@@ -238,6 +238,8 @@ XHS = PlatformSpec(
     label="小红书",
     hint="打开「小红书」App → 左上角菜单 → 扫一扫",
     login_url="https://www.xiaohongshu.com/login",
+    # ⚠ 小红书的 web_session 在「生成二维码」那一步就会下发（匿名会话），
+    #   所以不能只看它存不存在。sessions.poll() 会跟建会话时的快照比对值。
     session_cookie_keys=("web_session",),
     qrcode_selectors=(
         ".qrcode-img",

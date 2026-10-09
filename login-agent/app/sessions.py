@@ -43,6 +43,9 @@ class Session:
     status: str = "pending"  # pending | success | expired | error
     qrcode: str = ""
     cookie: str = ""
+    # 建会话那一刻的 cookie 快照（只存有值的）。
+    # 判定登录成功时必须拿它做对比 —— 详见 poll() 里的说明。
+    baseline: dict[str, str] = field(default_factory=dict)
     nickname: str = ""
     message: str = ""
     done_at: float = 0.0
@@ -91,6 +94,17 @@ class SessionManager:
         # 展示给用户」这一刻开始算，否则会话一创建就只剩几十秒寿命了。
         session.created_at = time.time()
 
+        # 记录「还没扫码时」的 cookie 快照。小红书在建二维码那一步就会下发
+        # 一个匿名 web_session，不存快照的话下一轮轮询立刻就会误判成登录成功。
+        try:
+            cookies = await context.cookies()
+            session.baseline = {c["name"]: c["value"] for c in cookies if c.get("value")}
+            log.info("[%s] 建会话时的 cookie 快照：%s",
+                     sid, sorted(session.baseline) or "（空）")
+        except Exception as exc:  # noqa: BLE001
+            session.baseline = {}
+            log.warning("[%s] 读取 cookie 快照失败：%s", sid, exc)
+
         async with self._lock:
             self._sessions[sid] = session
         self._ensure_cleaner()
@@ -128,7 +142,20 @@ class SessionManager:
             return self._snapshot(session)
 
         jar = {c["name"]: c["value"] for c in cookies if c.get("value")}
-        if any(k in jar for k in session.spec.session_cookie_keys):
+
+        # 登录成功的判据：会话 cookie 出现了，**而且跟建会话时的值不一样**。
+        #
+        # 为什么必须比对值而不能只看「存在」：
+        #   小红书在 /login 页生成二维码那一步就会下发一个匿名 web_session。
+        #   老代码只看 web_session 是否存在，于是二维码刚出来 0.7 秒就报
+        #   「登录成功」，把匿名 cookie 当成登录凭据存进了 data/cookies.json。
+        #   抖音同理 —— 先存快照、再比差异，两家都稳。
+        hit = next(
+            (k for k in session.spec.session_cookie_keys
+             if jar.get(k) and jar.get(k) != session.baseline.get(k)),
+            None,
+        )
+        if hit:
             session.status = "success"
             session.cookie = "; ".join(
                 f"{c['name']}={c['value']}" for c in cookies if c.get("value")
@@ -136,7 +163,8 @@ class SessionManager:
             session.nickname = await self._try_nickname(session)
             session.message = "登录成功"
             session.done_at = time.time()
-            log.info("[%s] 登录成功，cookie %d 字节", sid, len(session.cookie))
+            log.info("[%s] 登录成功（%s 已更新），cookie %d 字节",
+                     sid, hit, len(session.cookie))
             return self._snapshot(session)
 
         # 2) 看页面有没有提示二维码过期

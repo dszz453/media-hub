@@ -14,9 +14,17 @@
 #  下面依赖用的是不带 t64 后缀的老包名，trixie 上由同名虚拟包提供，
 #  apt 能正常解析（已实测通过）。这样写 12 / 13 两代都通用。
 #
+#  为什么必须跑「有头模式 + Xvfb」？
+#    抖音的登录面板由风控 SDK（rc-verifycenter / rmc-nocaptcha）把守。
+#    实测在 headless 下，rmc-nocaptcha 的 iframe 直接 ERR_ABORTED，
+#    随后登录面板虽然能点出来，但 /passport/web/get_qrcode/ 永远不返回，
+#    二维码区一直是个空白白框。换成 Xvfb 虚拟屏跑有头模式后，
+#    风控 SDK 全部 200，二维码接口正常返回，二维码正常渲染。
+#    小红书两种模式都能用，所以统一走有头模式。
+#
 #  为什么不用 `playwright install --with-deps`？
-#    它会顺带拖进 xvfb 等一整套 X server（112 个包 / 约 362MB），
-#    headless 场景根本用不到，纯属浪费构建时间与镜像体积。
+#    它会顺带拖进一整套 X server 依赖（112 个包 / 约 362MB），
+#    而我们只需要 xvfb 这一个包。
 # =============================================================================
 FROM python:3.11-slim
 
@@ -51,11 +59,8 @@ RUN set -eux; \
         > /etc/apt/sources.list.d/debian.sources; \
     rm -f /etc/apt/sources.list
 
-# Chromium headless 运行时依赖。
-# 刻意不含 fonts-noto-cjk（约 57MB）——我们只从页面里取二维码图片，
-# 不截图，中文字体渲染成豆腐块也不影响功能。
-# 也刻意不用 libu2f-udev，它会连带装进整个 systemd/udev（约 8MB），
-# 这里只需要 libudev1 这个动态库。
+# Chromium 运行时依赖 + xvfb（有头模式需要虚拟屏）。
+# fonts-noto-cjk 保留：登录页大量中文，缺字体会影响页面渲染与截图。
 RUN apt-get update -o Acquire::Retries=3 \
  && apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
         libnss3 libnspr4 \
@@ -65,7 +70,8 @@ RUN apt-get update -o Acquire::Retries=3 \
         libxkbcommon0 libxrandr2 \
         libpango-1.0-0 libcairo2 libasound2 \
         libudev1 libvulkan1 \
-        fonts-liberation \
+        xvfb \
+        fonts-liberation fonts-noto-cjk \
         ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
@@ -89,4 +95,7 @@ HEALTHCHECK --interval=30s --timeout=6s --start-period=45s --retries=3 \
 r=urllib.request.urlopen('http://127.0.0.1:8100/health',timeout=5); \
 sys.exit(0 if r.status==200 else 1)"
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100", "--workers", "1"]
+# 用 xvfb-run 起一块虚拟屏，Chromium 在里面跑有头模式。
+#   -a  自动挑一个空闲 display
+#   -s  指定 24 位色深（xvfb 默认 8 位，页面会渲染成灰的）
+CMD ["xvfb-run", "-a", "-s", "-screen 0 1366x900x24 -nolisten tcp", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100", "--workers", "1"]

@@ -52,16 +52,19 @@ RUN pip install --no-cache-dir -r requirements.txt \
 
 COPY app ./app
 
-# 非 root 运行，数据卷目录提前建好
+# 建非 root 用户。这里刻意不写 USER：入口脚本需要以 root 启动，
+# 才能修正绑定挂载进来的 /data 属主（bind mount 会盖掉镜像里的属主），
+# 修完自己 setuid 降到 appuser 再 exec。
 RUN useradd -m -u 1000 -s /usr/sbin/nologin appuser \
  && mkdir -p /data/cache /data/tmp \
  && chown -R appuser:appuser /data /app
-USER appuser
+
+COPY entrypoint.py ./
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8000/api/health || exit 1
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--", "python", "entrypoint.py"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

@@ -3,6 +3,10 @@
 常驻而不是每次新建，是因为 Chromium 冷启动要 5~15 秒，
 在路由器这种小机器上尤其明显；context 之间互相隔离，
 关掉 context 就等于「退出登录」，互不影响。
+
+跑的是**有头模式**（headless=False），靠容器启动时 xvfb-run 提供的
+虚拟屏显示。原因见 Dockerfile：抖音的风控 SDK 在 headless 下会拒绝
+下发二维码，有头模式才能过。
 """
 
 from __future__ import annotations
@@ -53,8 +57,10 @@ class BrowserPool:
                 return
             if self._pw is None:
                 self._pw = await async_playwright().start()
-            self._browser = await self._pw.chromium.launch(headless=True, args=LAUNCH_ARGS)
-            log.info("chromium 已就绪: %s", self._browser.version)
+            self._browser = await self._pw.chromium.launch(
+                headless=False, args=LAUNCH_ARGS
+            )
+            log.info("chromium 已就绪（有头模式）: %s", self._browser.version)
 
     async def stop(self) -> None:
         async with self._lock:

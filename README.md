@@ -52,13 +52,15 @@ docker compose up -d --build
 - 小红书 web 的 `x-s` 签名算法持续升级。实测 `xhs==0.2.13` 的纯 Python 签名
   在 `/api/sns/web/v1/login/*` 上稳定返回 `406`（它用自定义字符表编码，
   而线上是 `XYS_` 前缀的新算法）—— 这一点已用真实 Chrome 抓包对比确认。
-- 抖音 passport 接口有 JSVM(argus) 风控，`get_qrcode` 直接返回一段 JS 验证页
-  而不是 JSON，必须由真实浏览器执行 JS 生成 `__ac_signature` 指纹。
+- 抖音的登录面板由风控 SDK 把守（`rc-verifycenter` / `rmc-nocaptcha`）。
+  在 **headless** 浏览器里，风控 iframe 会直接 `ERR_ABORTED`，随后
+  `/passport/web/get_qrcode/` 永远不返回，二维码区一直是个空白白框。
+  换成 **有头模式**（Xvfb 虚拟屏）后风控才放行。
 
-所以扫码交给独立的 `login-agent` 容器（内置 Chromium），主服务保持轻量：
+所以扫码交给独立的 `login-agent` 容器（内置 Chromium + Xvfb），主服务保持轻量：
 
 ```
-网页「账号登录」──▶ 主服务 /api/login/* ──▶ login-agent (Chromium)
+网页「账号登录」──▶ 主服务 /api/login/* ──▶ login-agent (Chromium + Xvfb)
                        │                         │
                        │◀──── 二维码图片 ─────────┘（打开登录页并截图）
                        │
@@ -73,6 +75,10 @@ docker compose up -d --build
 2. 点对应平台的「扫码登录」
 3. 用手机 App 扫一扫并在手机上确认
 4. 看到「登录成功」即可 —— 凭据已保存，重启容器也不用重扫
+
+> **抖音要等得久一点**：它需要先加载风控 SDK、点 2~3 次才弹出登录面板、
+> 面板出来后再过十几秒二维码才渲染，全程 40~60 秒。小红书 10 秒左右。
+> `LOGIN_TIMEOUT` 默认给了 180 秒，就是这个原因。
 
 > **手动配置仍然支持**：把 Cookie 填到 `.env` 的 `XHS_COOKIE` / `DOUYIN_COOKIE`。
 > 扫码得到的凭据优先级更高；想改回手动，在「账号登录」页点「退出登录」。
@@ -211,11 +217,22 @@ python tests/smoke_test.py
 ## 常见问题
 
 **点「扫码登录」一直卡在「正在打开登录页…」**
-首次启动要加载 Chromium 内核，慢的话 20~30 秒。可以看登录容器的日志：
+首次启动要加载 Chromium 内核，慢的话 20~30 秒。抖音更慢（要过风控），
+40~60 秒是正常的。可以看登录容器的日志：
 
 ```bash
 docker compose logs -f login-agent
 ```
+
+**抖音二维码位置是个空白白框 / 一直不出二维码**
+说明风控没放行。检查两点：
+
+1. 容器必须跑在**有头模式**（`login-agent/app/browser.py` 里 `headless=False`），
+   并且由 `xvfb-run` 提供虚拟屏（见 `login-agent/Dockerfile` 的 `CMD`）。
+   在日志里应该能看到 `chromium 已就绪（有头模式）`。
+2. 日志里出现 `抖音登录面板已打开（第 N 次点击）` 才算点开成功。
+   如果一直是「点了 5 次仍未出现」，多半是页面结构变了，
+   用 `docker compose logs login-agent` 看实际情况。
 
 **扫码后提示「二维码已过期」**
 二维码有效期约 5 分钟，点弹窗里的「刷新二维码」重来一次。

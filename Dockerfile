@@ -9,11 +9,33 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple \
     TZ=Asia/Shanghai \
     DATA_DIR=/data
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
+# apt 换腾讯云源。基础镜像 python:3.11-slim 现在是 Debian 13 (trixie)，
+# 默认的 deb.debian.org 在国内下载 ffmpeg 这种大包会非常慢；
+# 实测同一台机器上腾讯云约 540KB/s，比默认源快一个数量级。
+# 直接重写 deb822 格式的 sources，兼容 12/13 两代。
+RUN set -eux; \
+    . /etc/os-release; \
+    printf '%s\n' \
+        'Types: deb' \
+        'URIs: https://mirrors.cloud.tencent.com/debian' \
+        "Suites: ${VERSION_CODENAME} ${VERSION_CODENAME}-updates" \
+        'Components: main' \
+        'Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp' \
+        '' \
+        'Types: deb' \
+        'URIs: https://mirrors.cloud.tencent.com/debian-security' \
+        "Suites: ${VERSION_CODENAME}-security" \
+        'Components: main' \
+        'Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp' \
+        > /etc/apt/sources.list.d/debian.sources; \
+    rm -f /etc/apt/sources.list
+
+RUN apt-get update -o Acquire::Retries=3 \
+ && apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
         ffmpeg \
         ca-certificates \
         curl \

@@ -1,4 +1,7 @@
 services:
+  # ---------------------------------------------------------------------------
+  # 主服务：搜索 / 收藏 / 歌单 / 音频转码 / 在线播放
+  # ---------------------------------------------------------------------------
   media-hub:
     build:
       context: .
@@ -8,11 +11,19 @@ services:
     ports:
       - "${HOST_PORT:-8000}:8000"
     environment:
-      # ---------- 平台凭据（留空则该平台降级/禁用）----------
+      # ---------- 平台凭据 ----------
+      # 扫码登录成功后，运行时的 data/cookies.json 会覆盖这里；
+      # 这两项留空也能用，只是扫码前该平台不可用。
       XHS_COOKIE: "${XHS_COOKIE:-}"
-      XHS_SIGN_SERVER: "${XHS_SIGN_SERVER:-}"
       DOUYIN_COOKIE: "${DOUYIN_COOKIE:-}"
+      # 可选：浏览器级 x-s 签名服务（纯 Python 签名失效时才有意义）
+      XHS_SIGN_SERVER: "${XHS_SIGN_SERVER:-}"
       YTDLP_COOKIES_FILE: "${YTDLP_COOKIES_FILE:-}"
+
+      # ---------- 扫码登录代理 ----------
+      LOGIN_AGENT_URL: "${LOGIN_AGENT_URL:-http://login-agent:8100}"
+      LOGIN_ENABLED: "${LOGIN_ENABLED:-true}"
+      LOGIN_TIMEOUT: "${LOGIN_TIMEOUT:-90}"
 
       # ---------- 网络 ----------
       # YouTube 在部分网络环境下需要代理
@@ -32,6 +43,8 @@ services:
     volumes:
       - ./data:/data
     restart: unless-stopped
+    depends_on:
+      - login-agent
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
       interval: 30s
@@ -40,20 +53,31 @@ services:
       start_period: 20s
 
   # ---------------------------------------------------------------------------
-  # 可选：小红书 x-s 签名 sidecar
-  #   小红书 Web 接口需要 x-s 签名，官方实现依赖 playwright + Chromium（约 400MB）。
-  #   把签名拆到独立容器，主镜像就能保持轻量。
+  # 扫码登录代理：用真实 Chromium 完成小红书 / 抖音扫码
   #
-  #   启用方式：
-  #     docker compose --profile sign up -d
-  #   并在 .env 里设置：
-  #     XHS_SIGN_SERVER=http://xhs-sign:5005
+  #   为什么必须单独一个容器跑浏览器：
+  #     * 小红书 web 接口的 x-s 签名算法持续升级，纯 Python 实现（xhs==0.2.13）
+  #       实测在登录类接口上稳定 406；逆向跟进成本高且随时失效。
+  #     * 抖音 passport 接口有 JSVM(argus) 风控，直接返回 JS 验证页而非 JSON。
+  #   两者都只认真实浏览器，所以把 Chromium 隔离在这里，主服务保持轻量。
   #
-  #   注意：sign 服务启动日志里会打印一个 a1，建议让它与 XHS_COOKIE 中的 a1 保持一致，
-  #   否则签名校验会间歇性失败。
+  #   资源占用：镜像约 1GB；运行时常驻内存约 200~350MB（Chromium 空闲态）。
+  #   不需要扫码时可以停掉它：docker compose stop login-agent
   # ---------------------------------------------------------------------------
-  xhs-sign:
-    image: reajason/xhs-api:latest
-    container_name: xhs-sign
-    profiles: ["sign"]
+  login-agent:
+    build:
+      context: ./login-agent
+      dockerfile: Dockerfile
+    image: media-hub-login-agent:latest
+    container_name: media-hub-login
+    # Chromium 对 /dev/shm 有要求，Docker 默认只有 64MB，必须放大
+    shm_size: "512m"
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8100/health',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 90s

@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import db
 from .config import settings
-from .routers import api
+from .routers import api, login
 from .services.tasks import manager
 
 logging.basicConfig(
@@ -55,6 +55,7 @@ app.add_middleware(
 )
 
 app.include_router(api.router)
+app.include_router(login.router)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 

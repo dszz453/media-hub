@@ -72,15 +72,21 @@ class DouyinProvider(Provider):
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._client: httpx.Client | None = None
+        self._cookie_used: str = ""
 
     # ------------------------------------------------------------------
     # 基础
     # ------------------------------------------------------------------
+    def _cookie(self) -> str:
+        """扫码登录保存的凭据优先，其次才是 .env 里的 DOUYIN_COOKIE。"""
+        from ..services import credentials
+        return credentials.get_cookie("douyin") or settings.douyin_cookie
+
     def available(self) -> tuple[bool, str]:
         if not settings.douyin_enabled:
             return False, "已通过 DOUYIN_ENABLED 关闭"
-        if not settings.douyin_cookie:
-            return False, "未配置 DOUYIN_COOKIE（抖音搜索强制要求登录态，无 cookie 会返回 2483）"
+        if not self._cookie():
+            return False, "未登录：可在「账号」页扫码登录，或配置 DOUYIN_COOKIE"
         return True, "ok"
 
     def _headers(self) -> dict[str, str]:
@@ -90,28 +96,38 @@ class DouyinProvider(Provider):
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         }
-        if settings.douyin_cookie:
-            headers["Cookie"] = settings.douyin_cookie
+        cookie = self._cookie()
+        if cookie:
+            headers["Cookie"] = cookie
         return headers
 
     def _get_client(self) -> httpx.Client:
-        if self._client is None:
-            with self._lock:
-                if self._client is None:
-                    kwargs: dict[str, Any] = {
-                        "timeout": settings.search_timeout,
-                        "follow_redirects": True,
-                        "headers": self._headers(),
-                    }
-                    if settings.proxy:
-                        kwargs["proxy"] = settings.proxy
-                    self._client = httpx.Client(**kwargs)
+        cookie = self._cookie()
+        if self._client is not None and self._cookie_used == cookie:
+            return self._client
+        with self._lock:
+            if self._client is not None and self._cookie_used == cookie:
+                return self._client
+            if self._client is not None:
+                try:
+                    self._client.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                self._client = None
+            kwargs: dict[str, Any] = {
+                "timeout": settings.search_timeout,
+                "follow_redirects": True,
+                "headers": self._headers(),
+            }
+            if settings.proxy:
+                kwargs["proxy"] = settings.proxy
+            self._client = httpx.Client(**kwargs)
+            self._cookie_used = cookie
         return self._client
 
-    @staticmethod
-    def _cookie_value(key: str) -> str:
+    def _cookie_value(self, key: str) -> str:
         """从 cookie 串里抠出某个字段（msToken 要跟着一起签名）。"""
-        for block in (settings.douyin_cookie or "").split(";"):
+        for block in (self._cookie() or "").split(";"):
             if "=" not in block:
                 continue
             name, _, value = block.partition("=")
@@ -256,7 +272,7 @@ class DouyinProvider(Provider):
             headers={
                 "User-Agent": DOUYIN_UA,
                 "Referer": "https://www.douyin.com/",
-                **({"Cookie": settings.douyin_cookie} if settings.douyin_cookie else {}),
+                **({"Cookie": self._cookie()} if self._cookie() else {}),
             },
             title=(aweme.get("desc") or item.title or "").strip()[:120],
             author=(author.get("nickname") or item.author or "").strip(),

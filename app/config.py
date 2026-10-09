@@ -55,6 +55,7 @@ class Settings:
 
         # ---------- 小红书 ----------
         # 必需字段：a1 / web_session / webId，直接从浏览器 Cookie 复制整串
+        # 注意：扫码登录成功后，运行时凭据会覆盖这里的值（见 services/credentials.py）
         self.xhs_cookie = _env("XHS_COOKIE", "")
         # 签名服务地址。为空则尝试本地 playwright；都没有则小红书不可用
         self.xhs_sign_server = _env("XHS_SIGN_SERVER", "").rstrip("/")
@@ -63,6 +64,12 @@ class Settings:
         # ---------- 抖音 ----------
         self.douyin_cookie = _env("DOUYIN_COOKIE", "")
         self.douyin_enabled = _env_bool("DOUYIN_ENABLED", True)
+
+        # ---------- 扫码登录代理 ----------
+        # 独立容器，用真实 Chromium 完成扫码（两家平台的登录接口都只认浏览器）
+        self.login_agent_url = _env("LOGIN_AGENT_URL", "http://login-agent:8100").rstrip("/")
+        self.login_enabled = _env_bool("LOGIN_ENABLED", True)
+        self.login_timeout = _env_int("LOGIN_TIMEOUT", 60)
 
         # ---------- YouTube ----------
         self.youtube_enabled = _env_bool("YOUTUBE_ENABLED", True)

@@ -127,6 +127,7 @@
     if (S.view === 'history') return renderHistory(c);
     if (S.view === 'playlists') return renderPlaylists(c);
     if (S.view === 'tasks') return renderTasks(c);
+    if (S.view === 'account') return renderAccount(c);
     if (S.view === 'settings') return renderSettings(c);
   }
 
@@ -922,6 +923,198 @@
   }
 
   // ======================================================================
+  // 账号登录（扫码）
+  //
+  // 小红书 / 抖音的登录接口都只认真实浏览器，所以二维码由后端的
+  // login-agent 容器（Chromium）生成并截图，这里只负责展示 + 轮询。
+  // ======================================================================
+  const PLATFORM_META = {
+    xhs:     { label: '小红书', logo: '书', cls: 'xhs',     hint: '打开「小红书」App → 左上角菜单 → 扫一扫' },
+    douyin:  { label: '抖音',   logo: '抖', cls: 'douyin',  hint: '打开「抖音」App → 左上角 → 扫一扫' },
+    youtube: { label: 'YouTube', logo: '▶', cls: 'youtube', hint: '' },
+  };
+
+  let loginState = { platform: null, sid: null, timer: null };
+
+  async function renderAccount(c) {
+    c.innerHTML = '<div class="account-grid"><div class="account-card"><div class="ac-sub">加载中…</div></div></div>';
+    let data;
+    try {
+      data = await api('/api/login/status');
+    } catch (err) {
+      c.innerHTML = `<div class="account-card"><div class="ac-sub">获取登录状态失败：${esc(err.message)}</div></div>`;
+      return;
+    }
+    updateLoginBadge(data);
+
+    const cards = (data.platforms || []).map((p) => {
+      const meta = PLATFORM_META[p.platform] || { label: p.platform, logo: '?', cls: '' };
+      const on = !!p.logged_in;
+      const sub = on
+        ? `已登录${p.nickname ? ' · ' + esc(p.nickname) : ''}`
+        : '未登录 —— 该平台无法搜索';
+      let actions = '';
+      if (p.platform === 'youtube') {
+        actions = '<span class="ac-sub">YouTube 不需要登录，配置好代理即可直接搜索</span>';
+      } else if (on) {
+        actions = `<button class="btn-ghost" data-logout="${p.platform}">退出登录</button>
+                   <button class="btn-ghost" data-login="${p.platform}">重新扫码</button>`;
+      } else {
+        actions = `<button class="btn-primary" data-login="${p.platform}">扫码登录</button>`;
+      }
+      return `
+        <div class="account-card">
+          <div class="ac-head">
+            <div class="ac-logo ${meta.cls}">${meta.logo}</div>
+            <div style="flex:1;min-width:0">
+              <div class="ac-name">${esc(meta.label)}</div>
+              <div class="ac-sub">${sub}</div>
+            </div>
+            <span class="ac-state ${on ? 'on' : 'off'}">${on ? '已登录' : '未登录'}</span>
+          </div>
+          <div class="ac-foot">${actions}</div>
+        </div>`;
+    }).join('');
+
+    const notice = data.enabled
+      ? (data.agent_ready ? '' : '<div class="account-card" style="margin-top:14px"><div class="ac-sub">登录服务还在启动中（首次需要加载浏览器内核，约 10~30 秒），稍后重试即可。</div></div>')
+      : '<div class="account-card" style="margin-top:14px"><div class="ac-sub">扫码登录已被 LOGIN_ENABLED 关闭。</div></div>';
+
+    c.innerHTML = `
+      <div style="margin-bottom:16px">
+        <h2 style="margin:0 0 6px;font-size:19px">账号登录</h2>
+        <p style="margin:0;color:var(--text-dim);font-size:13px">
+          小红书和抖音都需要登录才能搜索。点「扫码登录」，用手机 App 扫一扫即可，登录状态会保存在服务端。
+        </p>
+      </div>
+      <div class="account-grid">${cards}</div>
+      ${notice}
+    `;
+  }
+
+  function openLoginModal(platform) {
+    const meta = PLATFORM_META[platform] || {};
+    $('#loginTitle').textContent = '扫码登录 · ' + (meta.label || platform);
+    $('#loginModal').classList.remove('hidden');
+    startLogin(platform);
+  }
+
+  function closeLoginModal() {
+    $('#loginModal').classList.add('hidden');
+    if (loginState.timer) { clearTimeout(loginState.timer); loginState.timer = null; }
+    if (loginState.sid) {
+      api(`/api/login/${loginState.platform}/cancel/${loginState.sid}`, { method: 'POST' }).catch(() => {});
+    }
+    loginState = { platform: null, sid: null, timer: null };
+  }
+
+  function setLoginStatus(text, cls) {
+    const el = $('#loginStatus');
+    el.textContent = text;
+    el.className = 'login-status' + (cls ? ' ' + cls : '');
+  }
+
+  async function startLogin(platform) {
+    if (loginState.timer) { clearTimeout(loginState.timer); loginState.timer = null; }
+    if (loginState.sid) {
+      api(`/api/login/${loginState.platform}/cancel/${loginState.sid}`, { method: 'POST' }).catch(() => {});
+    }
+    loginState.platform = platform;
+    loginState.sid = null;
+    const img = $('#loginQr');
+    img.removeAttribute('src');
+    $('#qrLoading').classList.remove('hidden');
+    $('#loginHint').textContent = '';
+    setLoginStatus('正在打开登录页…（首次较慢）', '');
+
+    try {
+      const data = await api(`/api/login/${platform}/start`, { method: 'POST' });
+      loginState.sid = data.session_id;
+      img.src = data.qrcode;
+      $('#qrLoading').classList.add('hidden');
+      setLoginStatus('请用手机 App 扫码', '');
+      const meta = PLATFORM_META[platform] || {};
+      $('#loginHint').textContent = meta.hint || '';
+      pollLogin();
+    } catch (err) {
+      $('#qrLoading').classList.add('hidden');
+      setLoginStatus('获取二维码失败：' + err.message, 'err');
+    }
+  }
+
+  async function pollLogin() {
+    if (!loginState.sid) return;
+    try {
+      const data = await api(`/api/login/${loginState.platform}/poll/${loginState.sid}`);
+      if (data.status === 'success') {
+        setLoginStatus('登录成功！', 'ok');
+        $('#loginHint').textContent = data.nickname ? ('账号：' + data.nickname) : '凭据已保存';
+        toast('登录成功，可以开始搜索了', 'ok');
+        setTimeout(() => {
+          closeLoginModal();
+          if (S.view === 'account') render();
+          refreshLoginStatus();
+        }, 1200);
+        return;
+      }
+      if (data.status === 'expired') {
+        setLoginStatus('二维码已过期，请点「刷新二维码」', 'err');
+        return;
+      }
+      if (data.status === 'error') {
+        setLoginStatus(data.message || '浏览器会话异常', 'err');
+        return;
+      }
+      if (data.qrcode && !$('#loginQr').getAttribute('src')) $('#loginQr').src = data.qrcode;
+      loginState.timer = setTimeout(pollLogin, 1500);
+    } catch (err) {
+      setLoginStatus('轮询失败：' + err.message, 'err');
+      loginState.timer = setTimeout(pollLogin, 3000);
+    }
+  }
+
+  async function refreshLoginStatus() {
+    try { updateLoginBadge(await api('/api/login/status')); } catch (_) { /* ignore */ }
+  }
+
+  function updateLoginBadge(data) {
+    const badge = $('#loginBadge');
+    if (!badge) return;
+    const missing = (data.platforms || []).filter((p) => !p.logged_in && p.platform !== 'youtube');
+    badge.classList.toggle('hidden', missing.length === 0);
+  }
+
+  async function doLogout(platform) {
+    try {
+      await api('/api/login/' + platform, { method: 'DELETE' });
+      toast('已退出登录', 'ok');
+      render();
+      refreshLoginStatus();
+    } catch (err) {
+      toast('退出失败：' + err.message, 'err');
+    }
+  }
+
+  function bindLoginUI() {
+    $('#btnLoginClose').addEventListener('click', closeLoginModal);
+    document.querySelectorAll('[data-login-close]').forEach((el) =>
+      el.addEventListener('click', closeLoginModal));
+    $('#btnLoginRefresh').addEventListener('click', () => {
+      if (loginState.platform) startLogin(loginState.platform);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !$('#loginModal').classList.contains('hidden')) closeLoginModal();
+    });
+    // 账号卡片上的按钮走事件委托，避免每次 render 重新绑定
+    $('#content').addEventListener('click', (e) => {
+      const loginBtn = e.target.closest('[data-login]');
+      if (loginBtn) { openLoginModal(loginBtn.dataset.login); return; }
+      const logoutBtn = e.target.closest('[data-logout]');
+      if (logoutBtn) { doLogout(logoutBtn.dataset.logout); }
+    });
+  }
+
+  // ======================================================================
   // 侧边栏存储信息
   // ======================================================================
   async function refreshSidebar() {
@@ -943,6 +1136,8 @@
     refreshFavSet().then(render);
     refreshSidebar();
     startPolling();
+    bindLoginUI();
+    refreshLoginStatus();
     setInterval(refreshSidebar, 30000);
     api('/api/health').catch(() => toast('后端未就绪，请稍候重试', 'err'));
   }

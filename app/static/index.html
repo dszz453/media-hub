@@ -27,6 +27,7 @@
       <a class="nav-item" data-view="history"><i>🕘</i><span>最近播放</span></a>
       <a class="nav-item" data-view="playlists"><i>📁</i><span>我的歌单</span></a>
       <a class="nav-item" data-view="tasks"><i>⬇️</i><span>任务队列</span><em id="taskBadge" class="badge hidden">0</em></a>
+      <a class="nav-item" data-view="account"><i>👤</i><span>账号登录</span><em id="loginBadge" class="badge badge-warn hidden">!</em></a>
       <a class="nav-item" data-view="settings"><i>⚙️</i><span>设置</span></a>
     </nav>
 
@@ -106,6 +107,28 @@
 
 <audio id="audio" preload="metadata"></audio>
 <div class="toast-wrap" id="toastWrap"></div>
+
+<!-- ================= 扫码登录弹窗 ================= -->
+<div class="modal hidden" id="loginModal">
+  <div class="modal-mask" data-login-close="1"></div>
+  <div class="modal-panel login-panel">
+    <div class="modal-head">
+      <strong id="loginTitle">扫码登录</strong>
+      <button class="icon-btn" id="btnLoginClose" title="关闭">✕</button>
+    </div>
+    <div class="login-stage">
+      <div class="qr-box">
+        <img id="loginQr" alt="登录二维码" />
+        <div class="qr-loading" id="qrLoading"><div class="spinner"></div><span>正在打开登录页…</span></div>
+      </div>
+      <div class="login-status" id="loginStatus">正在获取二维码…</div>
+      <div class="login-hint" id="loginHint"></div>
+      <div class="login-actions">
+        <button class="btn-ghost" id="btnLoginRefresh">刷新二维码</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script src="/static/app.js"></script>
 </body>

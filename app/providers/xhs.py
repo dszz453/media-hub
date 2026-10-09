@@ -43,15 +43,21 @@ class XhsProvider(Provider):
         self._client: Any = None
         self._lock = threading.Lock()
         self._init_error: str = ""
+        self._cookie_used: str = ""
 
     # ------------------------------------------------------------------
     # 初始化
     # ------------------------------------------------------------------
+    def _cookie(self) -> str:
+        """扫码登录保存的凭据优先，其次才是 .env 里的 XHS_COOKIE。"""
+        from ..services import credentials
+        return credentials.get_cookie("xhs") or settings.xhs_cookie
+
     def available(self) -> tuple[bool, str]:
         if not settings.xhs_enabled:
             return False, "已通过 XHS_ENABLED 关闭"
-        if not settings.xhs_cookie:
-            return False, "未配置 XHS_COOKIE（至少需要 web_session）"
+        if not self._cookie():
+            return False, "未登录：可在「账号」页扫码登录，或配置 XHS_COOKIE"
         try:
             self._ensure_client()
         except ProviderError as exc:
@@ -61,13 +67,14 @@ class XhsProvider(Provider):
         return True, "ok"
 
     def _ensure_client(self) -> Any:
-        if self._client is not None:
+        cookie = self._cookie()
+        if self._client is not None and self._cookie_used == cookie:
             return self._client
         with self._lock:
-            if self._client is not None:
+            if self._client is not None and self._cookie_used == cookie:
                 return self._client
-            if self._init_error:
-                raise ProviderError(self._init_error)
+            # cookie 变了（例如刚扫码登录完），清掉旧的失败状态重建客户端
+            self._init_error = ""
             try:
                 from xhs import XhsClient  # type: ignore
             except ImportError as exc:
@@ -75,11 +82,12 @@ class XhsProvider(Provider):
                 raise ProviderError(self._init_error) from exc
 
             self._client = XhsClient(
-                cookie=settings.xhs_cookie,
+                cookie=cookie,
                 user_agent=settings.request_ua,
                 timeout=settings.search_timeout,
                 sign=self._build_sign(),
             )
+            self._cookie_used = cookie
             return self._client
 
     def _build_sign(self) -> Callable[..., dict]:

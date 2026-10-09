@@ -411,6 +411,99 @@ img { display: block; }
 .toast.err  { border-left-color: #ff8a80; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
 
+/* ============================= 扫码登录弹窗 ============================= */
+.modal {
+  position: fixed; inset: 0; z-index: 1200;
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-mask {
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, .62);
+  animation: fadeIn .18s ease;
+}
+.modal-panel {
+  position: relative;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(0,0,0,.6);
+  animation: modalIn .22s cubic-bezier(.2,.9,.3,1.2);
+}
+@keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modalIn { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
+
+.login-panel { width: 364px; padding-bottom: 20px; }
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 15px 18px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.modal-head strong { font-size: 15px; }
+
+.login-stage { padding: 22px 22px 0; text-align: center; }
+.qr-box {
+  position: relative;
+  width: 200px; height: 200px;
+  margin: 0 auto;
+  background: #fff;
+  border-radius: 10px;
+  padding: 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+.qr-box img { width: 100%; height: 100%; object-fit: contain; border-radius: 4px; }
+.qr-loading {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; color: #666; font-size: 12px;
+  background: rgba(255,255,255,.95); border-radius: 10px;
+}
+.spinner {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 3px solid #e2e2e2; border-top-color: var(--accent);
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.login-status { margin-top: 16px; font-size: 13px; color: var(--text-sub); min-height: 20px; }
+.login-status.ok  { color: #4dd4d4; }
+.login-status.err { color: #ff8a80; }
+.login-hint { margin-top: 6px; font-size: 12px; color: var(--text-dim); min-height: 18px; }
+.login-actions { margin-top: 16px; display: flex; justify-content: center; gap: 10px; }
+
+.btn-ghost {
+  padding: 7px 16px; border-radius: 16px;
+  border: 1px solid var(--line); color: var(--text-sub);
+  background: transparent; font-size: 12px; transition: .15s;
+}
+.btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+.badge-warn { background: #ffc857 !important; color: #1a1a1a !important; }
+
+/* ---------------------------- 账号页 ---------------------------- */
+.account-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; }
+.account-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.account-card .ac-head { display: flex; align-items: center; gap: 11px; }
+.account-card .ac-logo {
+  width: 38px; height: 38px; border-radius: 10px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 700; color: #fff;
+}
+.ac-logo.xhs     { background: linear-gradient(135deg, #ff2e4d, #ff6b81); }
+.ac-logo.douyin  { background: linear-gradient(135deg, #1c1c22, #4a4a58); }
+.ac-logo.youtube { background: linear-gradient(135deg, #ff0000, #ff5c5c); }
+.account-card .ac-name { font-size: 15px; font-weight: 600; }
+.account-card .ac-sub  { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.ac-state { font-size: 12px; padding: 3px 10px; border-radius: 10px; display: inline-block; }
+.ac-state.on  { background: rgba(77,212,212,.14); color: #4dd4d4; }
+.ac-state.off { background: rgba(255,255,255,.06); color: var(--text-dim); }
+.account-card .ac-foot { display: flex; gap: 8px; align-items: center; }
+
 /* ============================= 响应式 ============================= */
 @media (max-width: 1180px) {
   .track { grid-template-columns: 34px 54px minmax(0, 1fr) 74px 130px; }

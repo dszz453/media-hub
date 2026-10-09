@@ -22,6 +22,13 @@
 #    风控 SDK 全部 200，二维码接口正常返回，二维码正常渲染。
 #    小红书两种模式都能用，所以统一走有头模式。
 #
+#  为什么不用 xvfb-run 而是自己写入口脚本？
+#    本镜像里 Debian 的 xvfb-run 会永久挂起：它靠 Xvfb 主动发 SIGUSR1
+#    判定「服务器就绪」，但这版 Xvfb 从来不发（已用信号探针实测确认）。
+#    结果就是 Xvfb 在 :99 正常服务、uvicorn 却永远起不来，
+#    容器表现为 Up / 日志全空 / 端口拒绝连接。
+#    细节见 docker-entrypoint.sh 顶部注释。
+#
 #  为什么不用 `playwright install --with-deps`？
 #    它会顺带拖进一整套 X server 依赖（112 个包 / 约 362MB），
 #    而我们只需要 xvfb 这一个包。
@@ -60,6 +67,7 @@ RUN set -eux; \
     rm -f /etc/apt/sources.list
 
 # Chromium 运行时依赖 + xvfb（有头模式需要虚拟屏）。
+# xauth 是 xvfb-run 的硬依赖，少了它会报 "xauth command not found" 起不来。
 # fonts-noto-cjk 保留：登录页大量中文，缺字体会影响页面渲染与截图。
 RUN apt-get update -o Acquire::Retries=3 \
  && apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
@@ -70,7 +78,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         libxkbcommon0 libxrandr2 \
         libpango-1.0-0 libcairo2 libasound2 \
         libudev1 libvulkan1 \
-        xvfb \
+        xvfb xauth \
         fonts-liberation fonts-noto-cjk \
         ca-certificates \
  && rm -rf /var/lib/apt/lists/*
@@ -82,6 +90,11 @@ RUN pip install --no-cache-dir -r requirements.txt \
  && playwright install chromium
 
 COPY app ./app
+
+# 入口脚本：起 Xvfb 虚拟屏 -> 导出 DISPLAY -> exec CMD
+COPY docker-entrypoint.sh /usr/local/bin/login-entrypoint
+RUN chmod 0755 /usr/local/bin/login-entrypoint \
+ && sh -n /usr/local/bin/login-entrypoint
 
 # 非 root 运行（Chromium 启动参数里带 --no-sandbox）
 RUN useradd -m -u 1000 -s /usr/sbin/nologin pwuser \
@@ -95,7 +108,7 @@ HEALTHCHECK --interval=30s --timeout=6s --start-period=45s --retries=3 \
 r=urllib.request.urlopen('http://127.0.0.1:8100/health',timeout=5); \
 sys.exit(0 if r.status==200 else 1)"
 
-# 用 xvfb-run 起一块虚拟屏，Chromium 在里面跑有头模式。
-#   -a  自动挑一个空闲 display
-#   -s  指定 24 位色深（xvfb 默认 8 位，页面会渲染成灰的）
-CMD ["xvfb-run", "-a", "-s", "-screen 0 1366x900x24 -nolisten tcp", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100", "--workers", "1"]
+# ENTRYPOINT 负责 Xvfb（自动挑空闲 display、24 位色深、等 socket 就绪后
+# 导出 DISPLAY），CMD 才是真正的服务进程。
+ENTRYPOINT ["/usr/local/bin/login-entrypoint"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100", "--workers", "1"]

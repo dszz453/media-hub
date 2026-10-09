@@ -934,7 +934,11 @@
     youtube: { label: 'YouTube', logo: '▶', cls: 'youtube', hint: '' },
   };
 
-  let loginState = { platform: null, sid: null, timer: null };
+  // gen 是「第几代请求」的代号。每次 startLogin / closeLoginModal 都 +1。
+  // 建会话请求要等很久（抖音实测 190 秒），如果用户在这期间切了平台或关了弹窗，
+  // 迟到的响应必须被丢弃 —— 否则它会拿旧平台的二维码去覆盖当前弹窗，
+  // 表现为「小红书里显示抖音的二维码」（反之亦然）。这就是之前的串台 bug。
+  let loginState = { platform: null, sid: null, timer: null, gen: 0 };
 
   async function renderAccount(c) {
     c.innerHTML = '<div class="account-grid"><div class="account-card"><div class="ac-sub">加载中…</div></div></div>';
@@ -1001,11 +1005,13 @@
 
   function closeLoginModal() {
     $('#loginModal').classList.add('hidden');
+    // 代号 +1：所有在途的 start / poll 响应回来时都会被判定为「过期」，直接丢弃。
+    const gen = ++loginState.gen;
     if (loginState.timer) { clearTimeout(loginState.timer); loginState.timer = null; }
     if (loginState.sid) {
       api(`/api/login/${loginState.platform}/cancel/${loginState.sid}`, { method: 'POST' }).catch(() => {});
     }
-    loginState = { platform: null, sid: null, timer: null };
+    loginState = { platform: null, sid: null, timer: null, gen };
   }
 
   function setLoginStatus(text, cls) {
@@ -1015,6 +1021,10 @@
   }
 
   async function startLogin(platform) {
+    // 先领一个代号。await 回来后如果代号变了，说明用户已经切到别的平台
+    // 或关掉了弹窗，这份响应必须整个丢掉（既不能画二维码，也不能开轮询）。
+    const gen = ++loginState.gen;
+
     if (loginState.timer) { clearTimeout(loginState.timer); loginState.timer = null; }
     if (loginState.sid) {
       api(`/api/login/${loginState.platform}/cancel/${loginState.sid}`, { method: 'POST' }).catch(() => {});
@@ -1027,25 +1037,44 @@
     $('#loginHint').textContent = '';
     setLoginStatus('正在打开登录页…（首次较慢）', '');
 
+    let data;
     try {
-      const data = await api(`/api/login/${platform}/start`, { method: 'POST' });
-      loginState.sid = data.session_id;
-      img.src = data.qrcode;
-      $('#qrLoading').classList.add('hidden');
-      setLoginStatus('请用手机 App 扫码', '');
-      const meta = PLATFORM_META[platform] || {};
-      $('#loginHint').textContent = meta.hint || '';
-      pollLogin();
+      // 注意：这里刻意**不** abort。请求中途取消会让服务端的建会话流程
+      // 被 asyncio 打断，浏览器 context 关不掉就泄漏了（CancelledError 不是
+      // Exception，服务端的 except 兜不住）。让它跑完、再显式取消更干净。
+      data = await api(`/api/login/${platform}/start`, { method: 'POST' });
     } catch (err) {
+      if (gen !== loginState.gen) return;          // 已经切走了，静默丢弃
       $('#qrLoading').classList.add('hidden');
       setLoginStatus('获取二维码失败：' + err.message, 'err');
+      return;
     }
+
+    if (gen !== loginState.gen) {
+      // 迟到的响应：这个会话已经没人要了，立刻取消，别占着名额不放。
+      api(`/api/login/${platform}/cancel/${data.session_id}`, { method: 'POST' }).catch(() => {});
+      return;
+    }
+
+    loginState.sid = data.session_id;
+    img.src = data.qrcode;
+    $('#qrLoading').classList.add('hidden');
+    setLoginStatus('请用手机 App 扫码', '');
+    const meta = PLATFORM_META[platform] || {};
+    $('#loginHint').textContent = meta.hint || '';
+    pollLogin();
   }
 
   async function pollLogin() {
     if (!loginState.sid) return;
+    // 把「这一次轮询属于哪一代、哪个平台、哪个会话」先记下来。
+    // 轮询本身也要 2~3 秒，回来时世界可能已经变了 —— 变了就闭嘴。
+    const gen = loginState.gen;
+    const platform = loginState.platform;
+    const sid = loginState.sid;
     try {
-      const data = await api(`/api/login/${loginState.platform}/poll/${loginState.sid}`);
+      const data = await api(`/api/login/${platform}/poll/${sid}`);
+      if (gen !== loginState.gen) return;
       if (data.status === 'success') {
         setLoginStatus('登录成功！', 'ok');
         $('#loginHint').textContent = data.nickname ? ('账号：' + data.nickname) : '凭据已保存';
@@ -1068,6 +1097,12 @@
       if (data.qrcode && !$('#loginQr').getAttribute('src')) $('#loginQr').src = data.qrcode;
       loginState.timer = setTimeout(pollLogin, 1500);
     } catch (err) {
+      if (gen !== loginState.gen) return;
+      // 会话在服务端已经没了（比如名额被挤掉、进程重启），别再傻傻重试。
+      if (/失效|不存在|过期/.test(err.message || '')) {
+        setLoginStatus('二维码已失效，请点「刷新二维码」重新获取', 'err');
+        return;
+      }
       setLoginStatus('轮询失败：' + err.message, 'err');
       loginState.timer = setTimeout(pollLogin, 3000);
     }

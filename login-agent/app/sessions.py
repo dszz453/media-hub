@@ -66,11 +66,13 @@ class SessionManager:
     # 对外接口
     # ------------------------------------------------------------------
     async def create(self, spec: PlatformSpec) -> dict:
-        async with self._lock:
-            if len(self._sessions) >= MAX_SESSIONS:
-                raise RuntimeError(
-                    f"同时进行的扫码会话已达上限（{MAX_SESSIONS}），请先完成或取消其他扫码"
-                )
+        # 先腾位置，绝不因为「名额满了」把用户挡在门外。
+        #
+        # 为什么必须这样：前端一旦没来得及取消（关弹窗、切平台、刷新页面），
+        # 旧会话就会赖在 _sessions 里不走，而名额只有 MAX_SESSIONS 个。
+        # 占满之后所有扫码都返回 409，用户表现为「完全登不上」——
+        # 实测就踩过这个坑（同时进行的扫码会话已达上限）。
+        await self._make_room(spec.key)
 
         await pool.start()
         context = await pool.new_context()
@@ -201,6 +203,33 @@ class SessionManager:
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
+    async def _make_room(self, key: str) -> None:
+        """给新会话腾地方：先关掉同平台的旧 pending 会话，还满就挤掉最老的。
+
+        只动 pending 的会话 —— success/expired/error 的会保留，
+        因为 success 的还等着前端把 cookie 取走（KEEP_AFTER_SUCCESS）。
+        """
+        victims: list[Session] = []
+        async with self._lock:
+            for s in list(self._sessions.values()):
+                if s.spec.key == key and s.status == "pending":
+                    self._sessions.pop(s.sid, None)
+                    victims.append(s)
+            while len(self._sessions) >= MAX_SESSIONS:
+                oldest = min(
+                    (s for s in self._sessions.values() if s.status == "pending"),
+                    key=lambda s: s.created_at,
+                    default=None,
+                )
+                if oldest is None:
+                    break
+                self._sessions.pop(oldest.sid, None)
+                victims.append(oldest)
+        for s in victims:
+            await self._close(s)
+            log.info("[%s] 为新会话腾位置，关闭旧会话（%s/%s）",
+                     s.sid, s.spec.key, s.status)
+
     async def _grab_qrcode(self, session: Session) -> str:
         """拿到二维码，快路径优先。
 
@@ -292,14 +321,16 @@ class SessionManager:
     async def _clean_loop(self) -> None:
         while True:
             try:
-                await asyncio.sleep(20)
+                await asyncio.sleep(10)
                 now = time.time()
                 async with self._lock:
                     stale = [
                         s for s in self._sessions.values()
                         if (s.status in ("success", "expired", "error")
                             and now - s.done_at > KEEP_AFTER_SUCCESS)
-                        or (s.status == "pending" and now - s.created_at > s.spec.ttl + 90)
+                        # pending 超过 ttl 就直接回收：多留 90 秒只会让
+                        # 「名额被赖着不走的旧会话占满」这个问题更容易发生。
+                        or (s.status == "pending" and now - s.created_at > s.spec.ttl)
                     ]
                     for s in stale:
                         self._sessions.pop(s.sid, None)

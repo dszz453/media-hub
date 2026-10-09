@@ -37,16 +37,27 @@ def ffmpeg_available() -> bool:
         return False
 
 
+# 工具版本在容器生命周期内不会变，但探测要 fork 两个子进程。
+# 这台机器（J1900）上 ffmpeg/yt-dlp 的冷启动加起来要 4~5 秒，
+# 而 /api/health 每次都调它 —— 正好卡在 Docker healthcheck 的 5 秒超时线上，
+# 容器于是被判成 unhealthy（接口本身其实一直是 200）。
+# 用 dict 做一次性缓存：第一次探测完就固定下来。
+_TOOL_VERSIONS: dict[str, str] | None = None
+
+
 def tool_versions() -> dict[str, str]:
-    out: dict[str, str] = {}
-    for name, cmd in (("ffmpeg", [_FFMPEG, "-version"]), ("yt-dlp", ["yt-dlp", "--version"])):
-        try:
-            res = subprocess.run(cmd, capture_output=True, timeout=15, text=True)
-            first = (res.stdout or res.stderr or "").splitlines()[0]
-            out[name] = first.strip()
-        except Exception as exc:  # pragma: no cover
-            out[name] = f"unavailable: {exc}"
-    return out
+    global _TOOL_VERSIONS
+    if _TOOL_VERSIONS is None:
+        out: dict[str, str] = {}
+        for name, cmd in (("ffmpeg", [_FFMPEG, "-version"]), ("yt-dlp", ["yt-dlp", "--version"])):
+            try:
+                res = subprocess.run(cmd, capture_output=True, timeout=15, text=True)
+                first = (res.stdout or res.stderr or "").splitlines()[0]
+                out[name] = first.strip()
+            except Exception as exc:  # pragma: no cover
+                out[name] = f"unavailable: {exc}"
+        _TOOL_VERSIONS = out
+    return dict(_TOOL_VERSIONS)
 
 
 def safe_filename(name: str, fallback: str = "audio") -> str:

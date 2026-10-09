@@ -48,9 +48,12 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
       interval: 30s
-      timeout: 5s
+      # 这台机器（J1900）很慢：首次健康检查要 fork ffmpeg/yt-dlp 探版本，
+      # 5s 太紧会把一直返回 200 的接口误判成 unhealthy。
+      # app/services/audio.py 已把版本探测结果缓存，之后都是毫秒级。
+      timeout: 15s
       retries: 3
-      start_period: 20s
+      start_period: 45s
 
   # ---------------------------------------------------------------------------
   # 扫码登录代理：用真实 Chromium 完成小红书 / 抖音扫码

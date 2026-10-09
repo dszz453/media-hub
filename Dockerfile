@@ -63,7 +63,10 @@ COPY entrypoint.py ./
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+# 超时给到 15s：这台机器（J1900）很慢，首次健康检查要 fork ffmpeg/yt-dlp
+# 探版本，5s 太紧会误判 unhealthy（接口本身一直是 200）。
+# app/services/audio.py 里已把版本探测结果做了进程内缓存，之后每次都是毫秒级。
+HEALTHCHECK --interval=30s --timeout=15s --start-period=45s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8000/api/health || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "python", "entrypoint.py"]

@@ -24,13 +24,14 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple \
+    PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple \
     DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Shanghai \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
 
-# apt 换腾讯云源：实测这台机器腾讯云约 540KB/s，阿里云只有 87KB/s。
+# apt 换腾讯云源：实测在这台机器上，阿里云的所有服务（debian / pypi）
+# 都被限速到 50~90 KB/s，腾讯云能跑到 15~25 MB/s，差两个数量级。
 # 直接重写 deb822 格式的 sources，比 sed 更稳（不同基础镜像里
 # 可能是 /etc/apt/sources.list，也可能是 sources.list.d/debian.sources）。
 RUN set -eux; \

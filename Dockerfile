@@ -9,13 +9,14 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple \
+    PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple \
     TZ=Asia/Shanghai \
     DATA_DIR=/data
 
 # apt 换腾讯云源。基础镜像 python:3.11-slim 现在是 Debian 13 (trixie)，
-# 默认的 deb.debian.org 在国内下载 ffmpeg 这种大包会非常慢；
-# 实测同一台机器上腾讯云约 540KB/s，比默认源快一个数量级。
+# 默认的 deb.debian.org 在国内下载 ffmpeg 这种大包会非常慢。
+# 实测在这台机器上阿里云的所有服务都被限速到 50~90 KB/s，
+# 腾讯云能跑到 15~25 MB/s，所以 apt 和 pip 都走腾讯云。
 # 直接重写 deb822 格式的 sources，兼容 12/13 两代。
 RUN set -eux; \
     . /etc/os-release; \

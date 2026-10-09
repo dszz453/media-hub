@@ -1,3 +1,19 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
-playwright==1.49.1
+
+# playwright 钉在 1.48.2，不要随手升到 1.49+。
+#
+# 从 1.49 开始，`playwright install chromium` 会同时下载两个东西：
+#   chromium                (builds/chromium/1148/chromium-linux.zip)
+#   chromium-headless-shell (builds/chromium/1148/chromium-headless-shell-linux.zip)
+# 而 npmmirror 的 playwright 镜像里 **只有完整 chromium**，
+# headless shell 那个文件是 404（已实测，1.49.1 构建直接失败）。
+#
+# 1.48.2 还没有 headless shell 这个概念，`install chromium` 只下一个
+# chromium-linux.zip（rev 1140，npmmirror 上有），headless 模式直接用完整 Chromium。
+#
+# 如果以后确实要升到 1.49+，两条路：
+#   1) `playwright install chromium --no-shell`，并在 browser.py 里加
+#      channel="chromium"，让 headless 走完整 Chromium；
+#   2) 把 PLAYWRIGHT_DOWNLOAD_HOST 换成有 headless shell 的镜像源。
+playwright==1.48.2

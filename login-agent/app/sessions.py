@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from playwright.async_api import BrowserContext, Page
 
 from .browser import pool
-from .platforms import PlatformSpec
+from .platforms import _QR_DATA_JS, PlatformSpec
 
 log = logging.getLogger("login-agent.sessions")
 
@@ -86,6 +86,10 @@ class SessionManager:
         except Exception as exc:  # noqa: BLE001
             await self._close(session)
             raise RuntimeError(f"打开 {spec.label} 登录页失败：{exc}") from exc
+
+        # 抖音光是把二维码等出来就要 60~150 秒，TTL 必须从「二维码真正
+        # 展示给用户」这一刻开始算，否则会话一创建就只剩几十秒寿命了。
+        session.created_at = time.time()
 
         async with self._lock:
             self._sessions[sid] = session
@@ -170,47 +174,53 @@ class SessionManager:
     # 内部
     # ------------------------------------------------------------------
     async def _grab_qrcode(self, session: Session) -> str:
-        """轮询候选选择器，谁先出现就用谁，总耗时不超过 qrcode_timeout。
+        """拿到二维码，快路径优先。
 
-        分两段：
-          * 前 80% 时间只试「精确」选择器（命中的一定是二维码本体）；
-          * 最后 20% 时间才加上「兜底」选择器（比如整个登录面板）。
-        为什么不是「每个选择器各等 qrcode_timeout」：抖音有 3 个精确候选，
-        那样最坏要等 3 倍时间，前端早就超时了。
+        快路径：一次 page.evaluate 直接在 DOM 里把二维码读成 data:URI。
+          抖音的二维码本身就是 512x512 的 base64 PNG，读 src 零损失；
+          而且一次往返比「每个选择器各来一次 count/is_visible/screenshot」
+          便宜一个数量级 —— 这台机器上每次 evaluate 要 2~3 秒，往返次数
+          就是总耗时的决定因素。
+
+        慢路径：快路径用掉 75% 预算还没拿到，才对选择器做元素截图兜底。
+          （截图在这台机器上很慢，实测 6~25 秒，所以只当保险。）
+
+        全程受 qrcode_timeout 约束，超时就抛错，避免把前端拖死。
         """
         page = session.page
         spec = session.spec
         started = time.time()
         total = spec.qrcode_timeout / 1000
-        strict_until = started + total * 0.8
-        deadline = started + total
+        fast_until = started + total * 0.75
         last_err: Exception | None = None
 
-        while time.time() < deadline:
-            selectors = spec.qrcode_selectors
-            if time.time() >= strict_until:
-                selectors = selectors + spec.qrcode_fallbacks
-            for sel in selectors:
-                try:
-                    loc = page.locator(sel).first
-                    if not await loc.count() or not await loc.is_visible():
-                        continue
-                    png = await loc.screenshot(type="png", timeout=8000)
-                    if png and len(png) > 200:
-                        log.info("二维码选择器命中: %s", sel)
-                        return "data:image/png;base64," + base64.b64encode(png).decode()
-                except Exception as exc:  # noqa: BLE001
-                    last_err = exc
-                    continue
-            await asyncio.sleep(1)
+        while time.time() < fast_until:
+            try:
+                uri = await page.evaluate(_QR_DATA_JS, list(spec.qrcode_selectors))
+            except Exception as exc:  # noqa: BLE001
+                uri = None
+                last_err = exc
+            if isinstance(uri, str) and uri.startswith("data:image") and len(uri) > 500:
+                log.info("二维码命中 data:URI（%d 字节，耗时 %.1fs）",
+                         len(uri), time.time() - started)
+                return uri
+            # 每次 evaluate 本身就要 2~7 秒，sleep 再长纯属浪费
+            await asyncio.sleep(1.0)
 
-        # 兜底：整页截图（二维码会小一点，但至少能用）
-        try:
-            png = await page.screenshot(type="png", full_page=False, timeout=15000)
-            log.warning("二维码选择器全部未命中，回退整页截图（%s）", last_err)
-            return "data:image/png;base64," + base64.b64encode(png).decode()
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(f"未能截取二维码：{exc}") from exc
+        log.warning("读不到二维码 data:URI（上次异常：%s），改用截图兜底", last_err)
+        for sel in spec.qrcode_selectors + spec.qrcode_fallbacks:
+            try:
+                loc = page.locator(sel).first
+                if not await loc.count() or not await loc.is_visible():
+                    continue
+                png = await loc.screenshot(type="png", timeout=20000)
+                if png and len(png) > 200:
+                    log.info("二维码截图命中: %s", sel)
+                    return "data:image/png;base64," + base64.b64encode(png).decode()
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                continue
+        raise RuntimeError(f"未能获取二维码：{last_err}")
 
     async def _try_nickname(self, session: Session) -> str:
         for sel in (".nickname", "[class*='nickname']", "[class*='user-name']"):

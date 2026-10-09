@@ -23,7 +23,7 @@ services:
       # ---------- 扫码登录代理 ----------
       LOGIN_AGENT_URL: "${LOGIN_AGENT_URL:-http://login-agent:8100}"
       LOGIN_ENABLED: "${LOGIN_ENABLED:-true}"
-      LOGIN_TIMEOUT: "${LOGIN_TIMEOUT:-180}"
+      LOGIN_TIMEOUT: "${LOGIN_TIMEOUT:-360}"
 
       # ---------- 网络 ----------
       # YouTube 在部分网络环境下需要代理

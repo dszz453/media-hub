@@ -69,7 +69,7 @@ class Settings:
         # 独立容器，用真实 Chromium 完成扫码（两家平台的登录接口都只认浏览器）
         self.login_agent_url = _env("LOGIN_AGENT_URL", "http://login-agent:8100").rstrip("/")
         self.login_enabled = _env_bool("LOGIN_ENABLED", True)
-        self.login_timeout = _env_int("LOGIN_TIMEOUT", 180)
+        self.login_timeout = _env_int("LOGIN_TIMEOUT", 360)
 
         # ---------- YouTube ----------
         self.youtube_enabled = _env_bool("YOUTUBE_ENABLED", True)

@@ -184,7 +184,10 @@ def probe_has_audio(path: Path) -> bool:
 # yt-dlp
 # ----------------------------------------------------------------------
 def _base_args() -> list[str]:
-    args = ["yt-dlp", "--no-warnings", "--no-playlist", "--ignore-config",
+    # 这里刻意不放 --no-playlist：它只对"视频+播放列表"型 URL 生效，
+    # 由各平台 extractor 自己判断，对 ytsearch 没有影响。
+    # 只在真正需要"只要这一条"的调用处（dump / 下载）显式加上，意图更清楚。
+    args = ["yt-dlp", "--no-warnings", "--ignore-config",
             "--no-check-certificates", "--socket-timeout", "20"]
     args += settings.ytdlp_proxy_args()
     if settings.ytdlp_cookies_file and Path(settings.ytdlp_cookies_file).exists():
@@ -217,7 +220,7 @@ def ytdlp_search(keyword: str, limit: int = 20, timeout: int | None = None) -> l
 
 
 def ytdlp_dump(url: str) -> dict[str, Any]:
-    args = _base_args() + ["--dump-json", "--skip-download", url]
+    args = _base_args() + ["--no-playlist", "--dump-json", "--skip-download", url]
     res = subprocess.run(args, capture_output=True, text=True,
                          timeout=settings.download_timeout)
     for line in (res.stdout or "").splitlines():
@@ -237,6 +240,7 @@ def ytdlp_extract_audio(
     out_dir.mkdir(parents=True, exist_ok=True)
     template = str(out_dir / f"{stem}.%(ext)s")
     args = _base_args() + [
+        "--no-playlist",          # 只要这一个视频，不要整个列表
         "-f", "bestaudio/best",
         "--extract-audio",
         "--audio-format", settings.audio_format,

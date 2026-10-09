@@ -1,0 +1,23 @@
+# ---- Web 框架 ----
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+aiofiles==24.1.0
+httpx==0.28.1
+pydantic==2.10.4
+
+# ---- 下载内核 ----
+# yt-dlp 不锁死版本：YouTube 提取规则变化频繁，
+# 重新 build 镜像时会自动拉取最新版，这是保持可用的关键。
+yt-dlp>=2024.8.6
+
+# ---- 平台 SDK ----
+# 小红书：xhs 负责协议与请求，签名由 xhs.help.sign（纯 Python）提供，
+# 因此不需要 playwright / chromium，镜像保持轻量。
+xhs==0.2.13
+
+# ---- 抖音签名 ----
+# app/vendor/abogus.py 依赖 gmssl 做 SM3 摘要。
+# 这里刻意不装完整的 f2：它的运行时依赖过重（protobuf / cryptography /
+# pillow / pyexecjs / black …）且会锁死 httpx、pydantic 版本。
+gmssl==3.2.2

@@ -106,8 +106,51 @@ docker compose up -d --build
 - 带名字的：`Cookie: a1=...; web_session=...`
 - 整段 cURL：`curl '...' -H 'cookie: a1=...; ...'`
 
-> ⚠️ **复制前请确认浏览器右上角显示的是你的头像，而不是「登录」按钮。**
-> 未登录状态下复制出来的 Cookie 一定校验不过。
+### 怎么复制才对（重要）
+
+**第一步：先确认自己真的登录了。**
+
+打开 <https://www.xiaohongshu.com>，看右上角 —— 必须是**你的头像**。
+如果是「登录」按钮，说明你根本没登录，这时候复制出来的一定是访客会话。
+
+想更确定的话，在控制台里跑这一句（小红书自己的接口，只读）：
+
+```js
+fetch('/api/sns/web/v2/user/me', {credentials: 'include'})
+  .then(r => r.json())
+  .then(r => console.log(r?.data?.guest === false
+      ? '✅ 已登录，可以复制了'
+      : '❌ 未登录（访客），请先登录', r));
+```
+
+看到 `✅ 已登录` 再往下走；看到 `guest: true` 就别复制了，复制也登不上。
+
+**第二步：从哪里复制。**
+
+方式 A（推荐，最不容易漏）：
+
+```
+F12 → Application → 左侧 Cookies → https://www.xiaohongshu.com
+→ 表格里全选（Ctrl+A）→ 复制
+```
+
+方式 B：
+
+```
+F12 → Network → 刷新页面 → 点列表里第一个请求
+→ Request Headers → 找到 cookie: 那一行 → 复制冒号后面的整串
+```
+
+**第三步：贴进来点「校验并登录」。** 校验不过会直接告诉你原因，不会写坏凭据。
+
+> ⚠️ **绝对不要在控制台里用 `document.cookie` 复制。**
+> `web_session` 是 **HttpOnly** Cookie，JavaScript 读不到它。
+> 用 `document.cookie` 复制出来的串里**没有 web_session**，
+> 看着挺长、字段挺全，其实是访客会话 —— 一定会报「登录已过期」。
+> 抖音同理（`sessionid` / `UIFID` 也是 HttpOnly），请从 Network 的请求头里整串复制。
+
+> 小红书这份 Cookie 里**必须包含** `a1`、`web_session`、`webId` 三个字段。
+> 缺 `web_session` 就不用试了。
 
 ### 手动配置 Cookie（可选）
 

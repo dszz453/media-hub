@@ -129,11 +129,23 @@
       </div>
 
       <div class="cookie-body hidden" id="cookieBody">
-        <p class="cookie-tip">
-          在<strong>已登录</strong>的浏览器里按 F12 → Network → 点任意一个请求 →
-          复制请求头里的 <code>Cookie</code> 整串，粘到下面。
-          提交后会先校验再保存，校验不过会告诉你原因。
-        </p>
+        <div class="cookie-tip">
+          <ol>
+            <li>确认页面<strong>右上角是你的头像</strong>，不是「登录」按钮。</li>
+            <li>
+              按 <code>F12</code> → <code>Application</code> → 左侧
+              <code>Cookies</code> → <code>https://www.xiaohongshu.com</code>，
+              把表格里的行<strong>全选复制</strong>（Tab 分隔也认）。
+            </li>
+            <li>粘到下面，点「校验并登录」。校验不过会告诉你差在哪。</li>
+          </ol>
+          <p class="cookie-warn">
+            ⚠️ 别在控制台里用 <code>document.cookie</code> 复制 ——
+            <code>web_session</code> 是 HttpOnly，JS 读不到它，
+            那样复制出来的是<strong>访客会话</strong>，一定登不上。
+            抖音同理，请从 <code>Network</code> 的请求头里整串复制。
+          </p>
+        </div>
         <textarea id="cookieInput" rows="5"
           placeholder="a1=...; web_session=...; ttwid=...; msToken=..."></textarea>
         <div class="cookie-actions">

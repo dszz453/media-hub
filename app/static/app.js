@@ -990,7 +990,9 @@
       <div style="margin-bottom:16px">
         <h2 style="margin:0 0 6px;font-size:19px">账号登录</h2>
         <p style="margin:0;color:var(--text-dim);font-size:13px">
-          小红书和抖音都需要登录才能搜索。点「扫码登录」，用手机 App 扫一扫即可，登录状态会保存在服务端。
+          小红书和抖音都需要登录才能搜索。点「扫码登录」，用手机 App 扫一扫即可，
+          登录状态会保存在服务端。扫码不方便时，也可以点「粘贴 Cookie」，
+          从浏览器里把 Cookie 复制过来 —— 会先校验能不能搜，通过才保存。
         </p>
       </div>
       <div class="account-grid">${cards}</div>
@@ -1002,10 +1004,18 @@
     const meta = PLATFORM_META[platform] || {};
     $('#loginTitle').textContent = '扫码登录 · ' + (meta.label || platform);
     $('#loginModal').classList.remove('hidden', 'cookie-mode');
+    setCookieToggleLabel(COOKIE_TOGGLE_TEXT);
     // 每次打开都把「粘贴 Cookie」区域收起来并清空上次的提示，
     // 免得上一轮的失败信息让人误以为是这一次的。
     resetCookiePanel();
     startLogin(platform);
+  }
+
+  const COOKIE_TOGGLE_TEXT = '扫码不顺利？粘贴 Cookie';
+
+  function setCookieToggleLabel(text) {
+    const btn = $('#btnCookieToggle');
+    if (btn) btn.textContent = text;
   }
 
   // 只做「粘贴 Cookie」时不必去启扫码会话 —— 那要等浏览器冷启动，
@@ -1015,6 +1025,7 @@
     $('#loginTitle').textContent = '粘贴 Cookie · ' + (meta.label || platform);
     $('#loginModal').classList.remove('hidden');
     $('#loginModal').classList.add('cookie-mode');
+    setCookieToggleLabel('← 改回扫码登录');
 
     // 领新代号，把可能还在飞的扫码请求全部作废，并顺手取消它的会话。
     const gen = ++loginState.gen;
@@ -1224,6 +1235,16 @@
       if (loginState.platform) startLogin(loginState.platform);
     });
     $('#btnCookieToggle').addEventListener('click', () => {
+      const modal = $('#loginModal');
+      // 已经在粘贴模式：这个按钮就是「改回扫码登录」
+      if (modal.classList.contains('cookie-mode')) {
+        const platform = loginState.platform;
+        modal.classList.remove('cookie-mode');
+        setCookieToggleLabel(COOKIE_TOGGLE_TEXT);
+        resetCookiePanel();
+        if (platform) startLogin(platform);
+        return;
+      }
       const body = $('#cookieBody');
       body.classList.toggle('hidden');
       setCookieStatus('', '');

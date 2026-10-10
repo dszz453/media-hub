@@ -66,6 +66,17 @@ class Provider:
         """返回 (是否可用, 说明)。不可用时前端会给出提示而不是静默失败。"""
         return True, "ok"
 
+    def check_cookie(self, cookie: str) -> tuple[bool, str]:
+        """校验一段候选 Cookie 是不是**真的登录态**。
+
+        用户在「账号」页粘贴 Cookie 时，先跑这个再落盘。不校验就直接存，
+        会把访客会话当成登录凭据（小红书给每个访客都发 web_session），
+        表现为「显示已登录，一搜就报登录已过期」。
+
+        返回 (是否可用, 说明)。子类必须实现。
+        """
+        return False, "该平台暂不支持粘贴 Cookie"
+
     def search(self, keyword: str, limit: int = 20) -> list[MediaItem]:
         raise NotImplementedError
 

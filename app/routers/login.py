@@ -16,6 +16,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 
 from ..config import settings
+from ..providers import get_provider
 from ..services import credentials
 
 log = logging.getLogger(__name__)
@@ -118,8 +119,55 @@ def cancel_login(platform: str, session_id: str) -> dict:
     return {"ok": True}
 
 
+@router.post("/{platform}/cookie")
+def import_cookie(platform: str, payload: dict) -> dict:
+    """手动粘贴 Cookie 登录。
+
+    关键点是**先校验再落盘**。小红书会给每个访客发一个匿名 web_session，
+    只看「有没有 cookie」会把访客会话当成登录态存下来，表现为
+    「账号页显示已登录，一搜索就报登录已过期」。所以这里真去搜一次，
+    搜得动才算数。
+
+    响应固定 200，用 ok 字段区分成败 —— 前端好把 message 直接显示出来。
+    """
+    _require_enabled()
+    if platform not in SUPPORTED:
+        return {"ok": False, "message": f"暂不支持该平台：{platform}"}
+
+    raw = str((payload or {}).get("cookie") or "")
+    cookie = credentials.normalize_cookie(raw)
+    if not cookie:
+        return {"ok": False, "message": "没读到有效的 Cookie，请把整串复制过来"}
+
+    provider = get_provider(platform)
+    if provider is None:
+        return {"ok": False, "message": f"没有 {platform} 的 Provider 实现"}
+
+    try:
+        ok, reason = provider.check_cookie(cookie)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("校验 %s cookie 时异常", platform)
+        return {"ok": False, "message": f"校验过程出错：{exc}"}
+
+    if not ok:
+        log.info("%s 粘贴的 cookie 校验未通过：%s", platform, reason)
+        return {"ok": False, "message": reason}
+
+    entry = credentials.set_cookie(platform, cookie, nickname="", source="manual")
+    log.info("已保存 %s 的手动粘贴凭据（%d 字节，%d 个字段）",
+             platform, len(cookie), cookie.count(";") + 1)
+    return {
+        "ok": True,
+        "message": "校验通过，登录凭据已保存",
+        "platform": platform,
+        "fields": cookie.count(";") + 1,
+        "updated_at": entry.get("updated_at") or 0,
+    }
+
+
 @router.delete("/{platform}")
 def logout(platform: str) -> dict:
     """退出登录：删掉扫码保存的凭据（.env 里的静态 cookie 不受影响）。"""
     removed = credentials.clear(platform)
     return {"ok": True, "removed": removed}
+

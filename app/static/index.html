@@ -125,6 +125,21 @@
       <div class="login-hint" id="loginHint"></div>
       <div class="login-actions">
         <button class="btn-ghost" id="btnLoginRefresh">刷新二维码</button>
+        <button class="btn-ghost" id="btnCookieToggle">扫码不顺利？粘贴 Cookie</button>
+      </div>
+
+      <div class="cookie-body hidden" id="cookieBody">
+        <p class="cookie-tip">
+          在<strong>已登录</strong>的浏览器里按 F12 → Network → 点任意一个请求 →
+          复制请求头里的 <code>Cookie</code> 整串，粘到下面。
+          提交后会先校验再保存，校验不过会告诉你原因。
+        </p>
+        <textarea id="cookieInput" rows="5"
+          placeholder="a1=...; web_session=...; ttwid=...; msToken=..."></textarea>
+        <div class="cookie-actions">
+          <button class="btn-primary" id="btnCookieSubmit">校验并登录</button>
+          <span class="cookie-status" id="cookieStatus"></span>
+        </div>
       </div>
     </div>
   </div>

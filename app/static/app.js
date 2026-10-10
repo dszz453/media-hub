@@ -962,9 +962,11 @@
         actions = '<span class="ac-sub">YouTube 不需要登录，配置好代理即可直接搜索</span>';
       } else if (on) {
         actions = `<button class="btn-ghost" data-logout="${p.platform}">退出登录</button>
-                   <button class="btn-ghost" data-login="${p.platform}">重新扫码</button>`;
+                   <button class="btn-ghost" data-login="${p.platform}">重新扫码</button>
+                   <button class="btn-ghost" data-cookie-login="${p.platform}">粘贴 Cookie</button>`;
       } else {
-        actions = `<button class="btn-primary" data-login="${p.platform}">扫码登录</button>`;
+        actions = `<button class="btn-primary" data-login="${p.platform}">扫码登录</button>
+                   <button class="btn-ghost" data-cookie-login="${p.platform}">粘贴 Cookie</button>`;
       }
       return `
         <div class="account-card">
@@ -999,8 +1001,92 @@
   function openLoginModal(platform) {
     const meta = PLATFORM_META[platform] || {};
     $('#loginTitle').textContent = '扫码登录 · ' + (meta.label || platform);
-    $('#loginModal').classList.remove('hidden');
+    $('#loginModal').classList.remove('hidden', 'cookie-mode');
+    // 每次打开都把「粘贴 Cookie」区域收起来并清空上次的提示，
+    // 免得上一轮的失败信息让人误以为是这一次的。
+    resetCookiePanel();
     startLogin(platform);
+  }
+
+  // 只做「粘贴 Cookie」时不必去启扫码会话 —— 那要等浏览器冷启动，
+  // 抖音还要过风控，白白让人干等几分钟。
+  function openCookieModal(platform) {
+    const meta = PLATFORM_META[platform] || {};
+    $('#loginTitle').textContent = '粘贴 Cookie · ' + (meta.label || platform);
+    $('#loginModal').classList.remove('hidden');
+    $('#loginModal').classList.add('cookie-mode');
+
+    // 领新代号，把可能还在飞的扫码请求全部作废，并顺手取消它的会话。
+    const gen = ++loginState.gen;
+    if (loginState.timer) { clearTimeout(loginState.timer); loginState.timer = null; }
+    if (loginState.sid) {
+      api(`/api/login/${loginState.platform}/cancel/${loginState.sid}`, { method: 'POST' }).catch(() => {});
+    }
+    loginState = { platform, sid: null, timer: null, gen };
+
+    resetCookiePanel();
+    $('#cookieBody').classList.remove('hidden');
+    $('#qrLoading').classList.add('hidden');
+    $('#loginQr').removeAttribute('src');
+    setLoginStatus('', '');
+    $('#loginHint').textContent = '';
+    $('#cookieInput').focus();
+  }
+
+  function resetCookiePanel() {
+    const body = $('#cookieBody');
+    if (body) body.classList.add('hidden');
+    const input = $('#cookieInput');
+    if (input) input.value = '';
+    setCookieStatus('', '');
+  }
+
+  function setCookieStatus(text, cls) {
+    const el = $('#cookieStatus');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'cookie-status' + (cls ? ' ' + cls : '');
+  }
+
+  // 粘贴 Cookie 登录：提交给后端，后端会先真搜一次再决定要不要保存，
+  // 所以「校验通过」就意味着这个平台现在确实能搜了。
+  async function submitCookieLogin() {
+    const platform = loginState.platform;
+    if (!platform) return;
+    const raw = ($('#cookieInput') || {}).value || '';
+    if (!raw.trim()) {
+      setCookieStatus('请先把 Cookie 粘进来', 'err');
+      return;
+    }
+    const btn = $('#btnCookieSubmit');
+    btn.disabled = true;
+    setCookieStatus('正在校验…（会真的搜一次，约 5~20 秒）', '');
+
+    // 校验期间这个弹窗可能已经被关掉/切平台了，回来时要用代号确认。
+    const gen = loginState.gen;
+    try {
+      const data = await api(`/api/login/${platform}/cookie`, {
+        method: 'POST',
+        body: JSON.stringify({ cookie: raw }),
+      });
+      if (gen !== loginState.gen) return;
+      if (data && data.ok) {
+        setCookieStatus(`✓ ${data.message}（${data.fields} 个字段）`, 'ok');
+        toast('登录成功，可以开始搜索了', 'ok');
+        setTimeout(() => {
+          closeLoginModal();
+          if (S.view === 'account') render();
+          refreshLoginStatus();
+        }, 1200);
+      } else {
+        setCookieStatus('✗ ' + ((data && data.message) || '校验未通过'), 'err');
+      }
+    } catch (err) {
+      if (gen !== loginState.gen) return;
+      setCookieStatus('✗ ' + err.message, 'err');
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   function closeLoginModal() {
@@ -1137,6 +1223,13 @@
     $('#btnLoginRefresh').addEventListener('click', () => {
       if (loginState.platform) startLogin(loginState.platform);
     });
+    $('#btnCookieToggle').addEventListener('click', () => {
+      const body = $('#cookieBody');
+      body.classList.toggle('hidden');
+      setCookieStatus('', '');
+      if (!body.classList.contains('hidden')) $('#cookieInput').focus();
+    });
+    $('#btnCookieSubmit').addEventListener('click', submitCookieLogin);
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && !$('#loginModal').classList.contains('hidden')) closeLoginModal();
     });
@@ -1144,6 +1237,8 @@
     $('#content').addEventListener('click', (e) => {
       const loginBtn = e.target.closest('[data-login]');
       if (loginBtn) { openLoginModal(loginBtn.dataset.login); return; }
+      const cookieBtn = e.target.closest('[data-cookie-login]');
+      if (cookieBtn) { openCookieModal(cookieBtn.dataset.cookieLogin); return; }
       const logoutBtn = e.target.closest('[data-logout]');
       if (logoutBtn) { doLogout(logoutBtn.dataset.logout); }
     });

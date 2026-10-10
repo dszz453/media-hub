@@ -106,3 +106,48 @@ def summary() -> list[dict]:
             "has_cookie": bool(cookie),
         })
     return out
+
+
+def normalize_cookie(raw: str) -> str:
+    """把用户粘贴的内容整理成标准 cookie 串。
+
+    用户复制 Cookie 的姿势五花八门，这里都兜住：
+      * 纯 cookie 串：``a=1; b=2``
+      * 从 DevTools 的 Application → Cookies 表格里多行复制
+      * 从请求头里连名字一起复制：``Cookie: a=1; b=2``
+      * 从 cURL 里复制：``-H 'cookie: a=1; b=2'``
+      * 首尾带引号、带换行
+
+    同名 cookie 保留**最后一个**（浏览器里后来覆盖的才作数）。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return ""
+
+    # 处理 `Cookie: ...` / cURL 的 `-H 'cookie: ...'`
+    low = text.lower()
+    idx = low.find("cookie:")
+    if idx != -1:
+        text = text[idx + len("cookie:"):]
+        for stop in ("'", '"', "\n", "\r", "\\"):
+            pos = text.find(stop)
+            if pos != -1:
+                text = text[:pos]
+
+    pairs: dict[str, str] = {}
+    for chunk in text.replace("\r", ";").replace("\n", ";").split(";"):
+        chunk = chunk.strip().strip("'\"")
+        if not chunk:
+            continue
+        if "=" in chunk:
+            name, _, value = chunk.partition("=")
+        elif "\t" in chunk:
+            # DevTools 的 Cookies 表格整块复制出来是「名字<TAB>值」
+            name, _, value = chunk.partition("\t")
+        else:
+            continue
+        name, value = name.strip(), value.strip()
+        if name:
+            pairs[name] = value
+    return "; ".join(f"{k}={v}" for k, v in pairs.items())
+

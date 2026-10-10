@@ -90,6 +90,25 @@ docker compose up -d --build
 > **手动配置仍然支持**：把 Cookie 填到 `.env` 的 `XHS_COOKIE` / `DOUYIN_COOKIE`。
 > 扫码得到的凭据优先级更高；想改回手动，在「账号登录」页点「退出登录」。
 
+### 粘贴 Cookie 登录（扫码走不通时的备用通道）
+
+账号页每张卡片上都有「粘贴 Cookie」按钮，贴进去点「校验并登录」即可。
+
+**它会先真的搜一次，搜得动才保存。** 这一步是必须的：小红书会给**每个访客**
+都发一个匿名 `web_session`，只看「有没有 cookie」会把访客会话当成登录态存下来，
+表现为「账号页显示已登录，一搜就报登录已过期」。校验不通过会直接告诉你原因
+（登录已过期 / 账号被风控 / Cookie 不完整），不会写进 `data/cookies.json`。
+
+粘贴姿势随便，下面几种都认：
+
+- 纯 cookie 串：`a1=...; web_session=...`
+- 从 DevTools → Application → Cookies 表格里整块复制（Tab 分隔）
+- 带名字的：`Cookie: a1=...; web_session=...`
+- 整段 cURL：`curl '...' -H 'cookie: a1=...; ...'`
+
+> ⚠️ **复制前请确认浏览器右上角显示的是你的头像，而不是「登录」按钮。**
+> 未登录状态下复制出来的 Cookie 一定校验不过。
+
 ### 手动配置 Cookie（可选）
 
 - **小红书**：浏览器登录 <https://www.xiaohongshu.com> → `F12` → Network →

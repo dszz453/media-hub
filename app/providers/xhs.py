@@ -125,6 +125,42 @@ class XhsProvider(Provider):
         return sign
 
     # ------------------------------------------------------------------
+    # 校验候选 cookie
+    # ------------------------------------------------------------------
+    def check_cookie(self, cookie: str) -> tuple[bool, str]:
+        """拿这段 cookie 真去搜一次，用结果判断它是不是登录态。
+
+        为什么用「搜索」而不是「查我是谁」：xhs SDK 的 GET 类接口签名有问题
+        （xhs 0.2.13 的本地签名对 GET 不覆盖 query string，服务端一律回 406
+        {"code":-1}），所以 get_self_info 拿不到有效信息。搜索是 POST，
+        签名正常，而且它正好就是我们真正要用的能力 —— 搜得动就是好 cookie。
+        """
+        if not cookie.strip():
+            return False, "Cookie 是空的"
+
+        try:
+            from xhs import XhsClient  # type: ignore
+        except ImportError:
+            return False, "容器里没装 xhs 库"
+
+        try:
+            client = XhsClient(
+                cookie=cookie,
+                user_agent=settings.request_ua,
+                timeout=settings.search_timeout,
+                sign=self._build_sign(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return False, f"小红书客户端初始化失败：{exc}"
+
+        try:
+            with _quiet_stdout():
+                client.get_note_by_keyword(keyword="美食", page=1, page_size=20)
+        except Exception as exc:  # noqa: BLE001
+            return False, _xhs_error_hint(exc)
+        return True, "ok"
+
+    # ------------------------------------------------------------------
     # 搜索
     # ------------------------------------------------------------------
     def search(self, keyword: str, limit: int = 20) -> list[MediaItem]:
@@ -309,3 +345,26 @@ def _normalize_sign(raw: Any) -> dict:
         if raw.get(key):
             out[key] = raw[key]
     return out or raw
+
+
+_XHS_ERROR_HINTS = {
+    "-100": "服务端判定「登录已过期」—— 这段 Cookie 不是登录态。"
+            "小红书会给每个访客都发一个匿名 web_session，看起来像登录但其实不是。"
+            "复制前请确认页面右上角显示的是你的头像，而不是「登录」按钮。",
+    "-101": "服务端说「无登录信息」—— Cookie 里没有携带登录会话，"
+            "多半复制时漏掉了 web_session。",
+    "300011": "账号被小红书风控了（「当前账号存在异常，请切换账号后重试」）。"
+              "建议先在手机 App 上正常用几天，或换一个账号。",
+    "461": "触发了验证码校验，稍后再试。",
+    "406": "签名校验没通过，通常是 Cookie 里缺 a1。",
+}
+
+
+def _xhs_error_hint(exc: Exception) -> str:
+    """把 xhs SDK 抛出的 dict 型异常翻译成人话。"""
+    text = str(exc)
+    for code, hint in _XHS_ERROR_HINTS.items():
+        if f"'code': {code}" in text or f'"code": {code}' in text:
+            return hint
+    return f"小红书接口报错：{text[:180]}"
+

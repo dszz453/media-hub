@@ -495,9 +495,10 @@ img { display: block; }
 .cookie-status.ok  { color: #4dd4d4; }
 .cookie-status.err { color: #ff8a80; }
 
-/* 只粘贴 Cookie 时，二维码区域整个收起来 */
+/* 只粘贴 Cookie 时，二维码区域整个收起来，「刷新二维码」也没意义 */
 .login-panel.cookie-mode .qr-box,
 #loginModal.cookie-mode .qr-box { display: none; }
+#loginModal.cookie-mode #btnLoginRefresh { display: none; }
 
 .btn-ghost {
   padding: 7px 16px; border-radius: 16px;

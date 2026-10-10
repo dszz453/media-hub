@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import re
 import threading
 from typing import Any, Callable
 
@@ -25,6 +26,9 @@ from ..config import settings
 from .base import MediaItem, Provider, ProviderError, Resolved, pick_first_url
 
 _COVER_KEYS = ("url_default", "url_pre", "url")
+
+# xhs SDK 抛出的异常里带的是 Python dict 的字面量，用这个把 msg 抠出来
+_MSG_RE = re.compile(r"['\"]msg['\"]:\s*['\"]([^'\"]*)['\"]")
 
 
 @contextlib.contextmanager
@@ -353,6 +357,9 @@ _XHS_ERROR_HINTS = {
             "复制前请确认页面右上角显示的是你的头像，而不是「登录」按钮。",
     "-101": "服务端说「无登录信息」—— Cookie 里没有携带登录会话，"
             "多半复制时漏掉了 web_session。",
+    "-3": "小红书没认出这段 Cookie（它回了一句「啊哦，薯队长遇到一些小麻烦」）。"
+          "通常是 Cookie 不完整或格式不对 —— 请在 Network 里整串复制，"
+          "不要只挑几个字段。",
     "300011": "账号被小红书风控了（「当前账号存在异常，请切换账号后重试」）。"
               "建议先在手机 App 上正常用几天，或换一个账号。",
     "461": "触发了验证码校验，稍后再试。",
@@ -366,5 +373,8 @@ def _xhs_error_hint(exc: Exception) -> str:
     for code, hint in _XHS_ERROR_HINTS.items():
         if f"'code': {code}" in text or f'"code": {code}' in text:
             return hint
-    return f"小红书接口报错：{text[:180]}"
+    # 没收录的错误码：至少把服务端原话抠出来，别把整个 dict 甩给用户
+    match = _MSG_RE.search(text)
+    detail = f"（服务端原话：{match.group(1)}）" if match else f"：{text[:150]}"
+    return f"小红书校验失败{detail}"
 
